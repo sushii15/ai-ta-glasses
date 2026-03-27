@@ -46,7 +46,7 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
-  // Always keep pdfjs-dist external so its worker .mjs file stays on disk
+  // Keep pdfjs-dist external so its worker .mjs file stays on disk
   const forceExternal = ["pdfjs-dist"];
   const finalExternals = [...new Set([...externals, ...forceExternal])];
 
@@ -59,8 +59,10 @@ async function buildAll() {
     define: {
       "process.env.NODE_ENV": '"production"',
     },
-    minify: true,
+    // Make ALL node built-ins external so no dynamic require issues
+    packages: "external",
     external: finalExternals,
+    minify: false,
     logLevel: "info",
   });
 }
