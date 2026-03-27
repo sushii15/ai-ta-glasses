@@ -46,17 +46,21 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
+  // Always keep pdfjs-dist external so its worker .mjs file stays on disk
+  const forceExternal = ["pdfjs-dist"];
+  const finalExternals = [...new Set([...externals, ...forceExternal])];
+
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "esm",
+    outfile: "dist/index.js",
     define: {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    external: finalExternals,
     logLevel: "info",
   });
 }
