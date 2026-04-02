@@ -21,14 +21,17 @@ declare global {
 }
 
 // ── Capture a frame from a video element as base64 jpeg ───────────────────────
-function captureFrame(video: HTMLVideoElement, quality = 0.85): { base64: string; mime: string } | null {
+function captureFrame(video: HTMLVideoElement, quality = 0.6): { base64: string; mime: string } | null {
   if (video.readyState < 2 || video.videoWidth === 0) return null;
   const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  // Cap at 640px wide to keep payload well under the 10MB proxy limit
+  const maxW = 640;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.drawImage(video, 0, 0);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL("image/jpeg", quality);
   const base64 = dataUrl.split(",")[1];
   return { base64, mime: "image/jpeg" };
@@ -41,6 +44,9 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [camActive, setCamActive] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
+  // Photo upload fallback when live camera isn't available
+  const [uploadedPhoto, setUploadedPhoto] = useState<{ base64: string; mime: string; preview: string } | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Lab manual ────────────────────────────────────────────────────────────
   const [manualLoaded, setManualLoaded] = useState(false);
@@ -92,7 +98,7 @@ export default function Home() {
     setCamError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
       if (videoRef.current) {
@@ -151,12 +157,15 @@ export default function Home() {
     setIsLoading(true);
     setIsScanning(true);
 
-    // Always capture camera frame if camera is active
+    // Use live camera frame OR uploaded photo (fallback)
     let imageBase64: string | undefined;
     let imageMime: string | undefined;
     if (camActive && videoRef.current) {
       const frame = captureFrame(videoRef.current);
       if (frame) { imageBase64 = frame.base64; imageMime = frame.mime; }
+    } else if (uploadedPhoto) {
+      imageBase64 = uploadedPhoto.base64;
+      imageMime = uploadedPhoto.mime;
     }
 
     // Optimistic user message
@@ -335,19 +344,66 @@ export default function Home() {
             data-testid="webcam-video"
           />
 
-          {/* No camera state */}
+          {/* No camera state — show photo upload fallback */}
           {!camActive && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80">
-              <Camera size={40} className="text-primary/40" />
-              <p className="text-sm text-muted-foreground font-mono">Camera offline</p>
-              {camError && (
-                <p className="text-xs text-destructive bg-destructive/10 px-3 py-2 rounded border border-destructive/30 max-w-xs text-center">
-                  {camError}
-                </p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/90 p-6">
+              {uploadedPhoto ? (
+                // Show uploaded photo preview
+                <>
+                  <img src={uploadedPhoto.preview} alt="Circuit" className="max-h-48 rounded border border-primary/30 object-contain" />
+                  <p className="text-xs text-primary/70 font-mono">Photo loaded — AI will analyze this</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => photoInputRef.current?.click()}>
+                      <Upload size={12} className="mr-1" /> Replace
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={startCamera}>
+                      <Camera size={12} className="mr-1" /> Try Live Camera
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                // No photo yet
+                <>
+                  <Camera size={36} className="text-primary/30" />
+                  <p className="text-sm text-muted-foreground font-mono">No camera access</p>
+                  <p className="text-xs text-muted-foreground/60 text-center max-w-[200px]">
+                    Upload a photo of your circuit instead
+                  </p>
+                  <div className="flex flex-col gap-2 w-full max-w-[200px]">
+                    <Button onClick={() => photoInputRef.current?.click()} size="sm" className="w-full">
+                      <Upload size={12} className="mr-2" /> Upload Circuit Photo
+                    </Button>
+                    <Button onClick={startCamera} size="sm" variant="outline" className="w-full">
+                      <Camera size={12} className="mr-2" /> Try Camera Again
+                    </Button>
+                  </div>
+                  {camError && (
+                    <p className="text-[10px] text-destructive/70 text-center max-w-[220px]">{camError}</p>
+                  )}
+                </>
               )}
-              <Button onClick={startCamera} size="sm">
-                <Camera size={12} className="mr-2" /> Enable Camera
-              </Button>
+              {/* Hidden file input */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    const dataUrl = ev.target?.result as string;
+                    const base64 = dataUrl.split(",")[1];
+                    const mime = file.type || "image/jpeg";
+                    setUploadedPhoto({ base64, mime, preview: dataUrl });
+                    toast({ title: "Photo loaded", description: "AI will analyze this image with your next message" });
+                  };
+                  reader.readAsDataURL(file);
+                  e.target.value = "";
+                }}
+              />
             </div>
           )}
 

@@ -6,13 +6,20 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 // Parse PDF using pdfjs-dist — pure JS, works on all platforms
 async function parsePdf(buffer: Buffer): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as any;
-  const { createRequire } = await import("module");
-  const { resolve } = await import("path");
-  const req = createRequire(import.meta.url);
-  const workerPath = resolve(
-    req.resolve("pdfjs-dist/package.json").replace("package.json", ""),
-    "legacy/build/pdf.worker.mjs"
-  );
+  // Resolve worker path using require (works in both ESM and CJS bundles)
+  const { resolve, dirname } = await import("path");
+  const { fileURLToPath } = await import("url");
+  // __filename shim for CJS; import.meta.url for ESM
+  let baseDir: string;
+  try {
+    // ESM context
+    baseDir = dirname(fileURLToPath(import.meta.url));
+  } catch {
+    // CJS context — __dirname is available globally
+    baseDir = (globalThis as any).__dirname ?? process.cwd();
+  }
+  // Walk up to find node_modules
+  const workerPath = resolve(baseDir, "../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs");
   pdfjsLib.GlobalWorkerOptions.workerSrc = `file:///${workerPath.replace(/\\/g, "/")}`;
 
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
@@ -33,7 +40,7 @@ async function parsePdf(buffer: Buffer): Promise<string> {
 import { storage } from "./storage";
 
 // ── Gemini setup ──────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyC38btKI9i_hZfD9VsmVONorbuZ-d173Bs";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Set GEMINI_API_KEY in your environment variables
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // gemini-2.5-flash — latest, fastest, multimodal, highest rate limits
